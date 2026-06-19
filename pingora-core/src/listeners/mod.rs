@@ -164,6 +164,11 @@ pub type PreTlsCallback = Arc<dyn PreTlsProcess>;
 struct TransportStackBuilder {
     l4: ServerAddress,
     tls: Option<TlsSettings>,
+    // Pre-built acceptor — used when SNI cert selection requires a custom
+    // ServerConfig (e.g. ResolvesServerCertUsingSni). Takes priority over `tls`
+    // if both are set. Remove once upstream supports this natively:
+    // https://github.com/cloudflare/pingora/issues/916
+    tls_acceptor: Option<Acceptor>,
     l4_buffer: L4BufferSettings,
     #[cfg(feature = "connection_filter")]
     connection_filter: Option<Arc<dyn ConnectionFilter>>,
@@ -192,7 +197,9 @@ impl TransportStackBuilder {
 
         Ok(TransportStack {
             l4,
-            tls: self.tls.take().map(|tls| Arc::new(tls.build())),
+            tls: self.tls_acceptor.take()
+                .map(Arc::new)
+                .or_else(|| self.tls.take().map(|tls| Arc::new(tls.build()))),
             l4_buffer: self.l4_buffer,
             pre_tls_callback: self.pre_tls_callback.clone(),
         })
@@ -454,6 +461,7 @@ impl Listeners {
         self.stacks.push(TransportStackBuilder {
             l4,
             tls,
+            tls_acceptor: None,
             l4_buffer,
             #[cfg(feature = "connection_filter")]
             connection_filter: self.connection_filter.clone(),
@@ -495,6 +503,22 @@ impl Listeners {
         self.stacks.push(TransportStackBuilder {
             l4,
             tls,
+            tls_acceptor: None,
+            l4_buffer: L4BufferSettings::default(),
+            #[cfg(feature = "connection_filter")]
+            connection_filter: self.connection_filter.clone(),
+            pre_tls_callback: self.pre_tls_callback.clone(),
+        })
+    }
+
+    /// Add a TLS endpoint using a pre-built [`Acceptor`] instead of [`TlsSettings`].
+    /// Use this for SNI-based cert selection via a custom rustls ServerConfig.
+    /// See [`TlsSettings::build_from_server_config`].
+    pub fn add_tls_with_acceptor(&mut self, addr: &str, acceptor: Acceptor) {
+        self.stacks.push(TransportStackBuilder {
+            l4: ServerAddress::Tcp(addr.into(), None),
+            tls: None,
+            tls_acceptor: Some(acceptor),
             l4_buffer: L4BufferSettings::default(),
             #[cfg(feature = "connection_filter")]
             connection_filter: self.connection_filter.clone(),

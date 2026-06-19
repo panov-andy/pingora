@@ -222,6 +222,19 @@ impl TlsSettings {
             offload_threadpool: None,
         })
     }
+
+    /// Build an [`Acceptor`] directly from a pre-configured [`ServerConfig`].
+    /// Use this when you need SNI-based cert selection via
+    /// `ServerConfig::with_cert_resolver` — something `TlsSettings::intermediate`
+    /// cannot express. Remove once upstream adds this natively:
+    /// https://github.com/cloudflare/pingora/issues/916
+    pub fn build_from_server_config(config: ServerConfig) -> Acceptor {
+        pingora_rustls::install_default_crypto_provider();
+        Acceptor {
+            acceptor: RusTlsAcceptor::from(Arc::new(config)),
+            callbacks: None,
+        }
+    }
 }
 
 impl Acceptor {
